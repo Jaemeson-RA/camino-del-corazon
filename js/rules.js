@@ -1,9 +1,10 @@
 // Regles du jeu : fonctions pures (etat -> nouvel etat) utilisees dans les
 // transactions Firebase. Chaque action renvoie le nouvel etat, ou null si
 // l'action n'est pas permise (la transaction est alors abandonnee).
-import { BOARD } from './board-data.js?v=202611122255';
-import { VERDADES, RETOS, PALABRAS, other, fill } from './content.js?v=202611122255';
-import { uid, rint, pick, plain } from './util.js?v=202611122255';
+import { BOARD } from './board-data.js?v=202611131305';
+import { VERDADES, RETOS, PALABRAS, other, fill } from './content.js?v=202611131305';
+import { uid, rint, pick, plain } from './util.js?v=202611131305';
+import { drawSet, markSeen, tileQ, rerollQ } from './questions.js?v=202611131305';
 
 export const LAST = BOARD.tiles.length - 1; // case META
 const arr = (v) => (Array.isArray(v) ? v.filter((x) => x != null) : v && typeof v === 'object' ? Object.values(v) : []);
@@ -22,6 +23,10 @@ export function norm(g0) {
   g.deck = { A: arr(g.deck && g.deck.A), J: arr(g.deck && g.deck.J) };
   g.newq = { A: arr(g.newq && g.newq.A), J: arr(g.newq && g.newq.J) };
   g.endMode = g.endMode || 'both';
+  g.qs = g.qs || {};
+  g.qseen = arr(g.qseen);
+  g.qmode = g.qmode || 'tablero';
+  g.rr = { A: 0, J: 0, ...(g.rr || {}) };
   if (g.mg) {
     g.mg.st = g.mg.st || {};
     if (g.mg.type === 'ppt') {
@@ -39,8 +44,10 @@ export function norm(g0) {
   return g;
 }
 
-export function newGame(prev, { endMode = 'both', first = 'A' } = {}) {
+export function newGame(prev, { endMode = 'both', first = 'A', qmode = 'nuevas' } = {}) {
   const p = norm(prev) || {};
+  // questions des dalles : tirees une fois pour la partie (meme tirage sur les deux telephones)
+  const set = drawSet(qmode, prev ? markSeen(p) : []);
   const deck = { A: [], J: [] };
   for (const k of ['A', 'J']) {
     const keep = arr(p.deck && p.deck[k]).filter((it) => it && it.t && !(p.usedDeck || {})[it.id]);
@@ -51,16 +58,18 @@ export function newGame(prev, { endMode = 'both', first = 'A' } = {}) {
     id: 'g' + uid(8), status: 'playing', endMode, turn: first, startedAt: Date.now(),
     pos: { A: 0, J: 0 }, score: { A: 0, J: 0 }, done: { A: false, J: false },
     log: [], usedVR: {}, usedDeck: {}, deck, newq: {}, n: 0,
+    qmode, qs: set.qs, qseen: set.seen,
   };
 }
 
 function cardFor(g, n, me) {
   const t = BOARD.tiles[n];
   const c = { id: 'c' + uid(8), n, by: me, type: t.type, at: Date.now() };
+  const tq = tileQ(g, n);
   switch (t.type) {
-    case 'adivina': return { ...c, phase: 'answer', q: fill(t.q, me) };
+    case 'adivina': return { ...c, phase: 'answer', q: fill(tq ? tq.q : t.q, me), label: tq ? tq.label : t.label, qid: tq ? tq.id : '' };
     case 'sincero':
-    case 'foto': return { ...c, phase: 'answer', q: t.label };
+    case 'foto': return { ...c, phase: 'answer', q: fill(tq ? tq.q || tq.label : t.label, me), label: tq ? tq.label : t.label, qid: tq ? tq.id : '' };
     case 'vr': return { ...c, phase: 'vr' };
     case 'libre': return { ...c, phase: 'ask' };
     case 'back2': return { ...c, phase: 'back2' };
@@ -70,6 +79,30 @@ function cardFor(g, n, me) {
 }
 
 const bump = (g) => { g.n = (g.n || 0) + 1; return g; };
+
+/** « Otra pregunta » : changements de question permis par joueur et par partie. */
+export const REROLLS = 1;
+export const canReroll = (g, me) => {
+  const c = g && g.card;
+  return !!c && c.phase === 'answer' && c.by === me && ['adivina', 'sincero', 'foto'].includes(c.type)
+    && !c.answer && !c.photo && ((g.rr && g.rr[me]) || 0) < REROLLS;
+};
+
+export function reroll(g0, me) {
+  const g = norm(g0);
+  if (!canReroll(g, me)) return null;
+  const c = g.card;
+  const q = rerollQ(g, c.n);
+  if (!q) return null;
+  g.qs['t' + c.n] = q.id;
+  g.rr[me] += 1;
+  c.q = fill(c.type === 'adivina' ? q.q : q.q || q.label, me);
+  c.label = q.label;
+  c.qid = q.id;
+  c.rerolled = (c.rerolled || 0) + 1;
+  delete c.typing;
+  return bump(g);
+}
 
 export function roll(g0, me, d1, d2) {
   const g = norm(g0);
@@ -187,7 +220,7 @@ function endTurn(g) {
   const c = g.card;
   if (c && !['back2', 'meta'].includes(c.type)) {
     g.log.push({
-      n: c.n, by: c.by, type: c.type, vr: c.vr || '', q: c.q || '', a: c.answer || '',
+      n: c.n, by: c.by, type: c.type, vr: c.vr || '', q: c.q || '', a: c.answer || '', label: c.label || '',
       photo: c.photo || '', ok: !!c.ok, mg: g.mg ? g.mg.type : '', mgres: g.mg ? g.mg.res || '' : '',
       pts: c.pts || {}, author: c.author || '', skip: !!c.skipped,
     });

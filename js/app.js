@@ -1,22 +1,25 @@
 // Chef d'orchestre : ecrans, HUD, cartes retournees, enchainement des animations.
-import { BOARD } from './board-data.js?v=202611122255';
-import { h, $, $$, sleep, clear, uid, rint } from './util.js?v=202611122255';
-import { PLAYERS, other, TYPE_BADGE, RULES, MINIJUEGOS } from './content.js?v=202611122255';
-import * as R from './rules.js?v=202611122255';
-import * as net from './net.js?v=202611122255';
-import * as sfx from './sfx.js?v=202611122255';
+import { BOARD } from './board-data.js?v=202611131305';
+import { h, $, $$, sleep, clear, uid, rint } from './util.js?v=202611131305';
+import { PLAYERS, other, TYPE_BADGE, RULES, MINIJUEGOS } from './content.js?v=202611131305';
+import * as R from './rules.js?v=202611131305';
+import * as net from './net.js?v=202611131305';
+import * as sfx from './sfx.js?v=202611131305';
 import {
   mountBoard, placePawns, movePawn, pawnBurst, tileRect, showHole, settleTile, highlightTile,
-  heartBeatBig, followPawn, setZoom, isSmall, toggleZoom, isZoomed,
-} from './board.js?v=202611122255';
-import { mountDice, rollTo, setDice } from './dice.js?v=202611122255';
-import { renderMG, roulette, mgSummary } from './minigames.js?v=202611122255';
+  heartBeatBig, followPawn, setZoom, isSmall, toggleZoom, isZoomed, setTileFaces,
+} from './board.js?v=202611131305';
+import { prepareFaces, faceUrl, setSig } from './tilefaces.js?v=202611131305';
+import { QMODES, QBY, MOODS } from './questions.js?v=202611131305';
+import { mountDice, rollTo, setDice } from './dice.js?v=202611131305';
+import { renderMG, roulette, mgSummary } from './minigames.js?v=202611131305';
 
 const S = {
   roomKey: '', me: '', room: null, game: null, presence: {},
   rendered: null, card: null, pending: null, running: false, lobbyForced: false,
-  seenMg: {}, typingAt: 0, endShownFor: '',
+  seenMg: {}, typingAt: 0, endShownFor: '', qsig: null,
 };
+const tileLabel = (x) => (x && x.label) || BOARD.tiles[x.n].label;
 const pad = (n) => String(n).padStart(2, '0');
 const NAME = (k) => PLAYERS[k].name;
 let dice;
@@ -163,7 +166,7 @@ function renderHUD() {
   const lastEl = $('#last');
   clear(lastEl);
   if (last) {
-    lastEl.append(h('small', { text: `Última: ${NAME(last.by)} · ${BOARD.tiles[last.n].label}` }),
+    lastEl.append(h('small', { text: `Última: ${NAME(last.by)} · ${tileLabel(last)}` }),
       h('div', { class: 'last-a', text: last.photo ? '📸 una foto' : last.a ? `«${last.a}»` : last.vr === 'reto' ? 'reto cumplido' : '' }),
       h('small', { class: last.ok ? 'ok' : 'ko', text: last.ok ? '✓ acertó' : last.mg ? mgLine(last) : '✗ sin punto' }));
   }
@@ -230,10 +233,19 @@ async function run() {
   renderHUD();
 }
 
+/** Dalles de la partie : celles dont la question a ete tiree au sort. */
+async function syncTiles(g) {
+  const sig = setSig(g);
+  if (sig === S.qsig) return;
+  S.qsig = sig;
+  try { setTileFaces(await prepareFaces(g)); } catch (e) { console.warn('dalles', e); }
+}
+
 async function transition(prev, g) {
   // premier affichage, nouvelle partie ou sauvegarde restauree : pas d'animation
   if (!prev || prev.id !== g.id || (prev.rk || '') !== (g.rk || '')) {
     if (S.card) await closeCard(true);
+    await syncTiles(g);
     placePawns(g.pos, g.turn);
     if (g.dice) { setDice(dice, g.dice.d1, g.dice.d2); $('#tray').dataset.sum = `= ${g.dice.d1 + g.dice.d2}`; } else delete $('#tray').dataset.sum;
     S.rendered = g;
@@ -242,6 +254,7 @@ async function transition(prev, g) {
     afterState(prev, g);
     return;
   }
+  await syncTiles(g);
   // 1. la carte precedente se referme
   if (S.card && (!g.card || g.card.id !== S.card.id)) await closeCard(false);
   // 2. des
@@ -278,13 +291,42 @@ async function transition(prev, g) {
     highlightTile(null, false);
     await openCard(g, false);
   }
+  if (g.card && prev.card && S.card && prev.card.id === g.card.id && (prev.card.rerolled || 0) !== (g.card.rerolled || 0)) {
+    await spinCard(g);
+  }
   if (g.card) renderCard(g);
   afterState(prev, g);
+}
+
+/** La carte fait un tour complet : on voit la dalle reecrite, puis la nouvelle question. */
+async function spinCard(g) {
+  const oc = S.card;
+  const img = oc.flyer.querySelector('.face.front img');
+  if (img) img.src = faceUrl(g.card.n);
+  sfx.play('flip');
+  const a = oc.flip.animate([
+    { transform: 'rotateY(180deg)' }, { transform: 'rotateY(360deg) scale(.96)', offset: 0.45 },
+    { transform: 'rotateY(360deg) scale(.96)', offset: 0.6 }, { transform: 'rotateY(540deg)' },
+  ], { duration: 1300, easing: EASE });
+  setTimeout(() => renderCard(g), 700);
+  await a.finished.catch(() => {});
+}
+
+/** Bandeau « a toi de jouer » au changement de tour. */
+function turnBanner(k) {
+  const mine = k === S.me;
+  const el = h('div', { class: `turn-banner tb-${k}` },
+    h('span', { class: `tok tok-${k}`, text: k }),
+    h('span', { class: 'tb-txt' }, h('b', { text: mine ? '¡Tu turno!' : `Turno de ${NAME(k)}` }),
+      h('small', { text: mine ? 'Lanza los dados 🎲' : 'Mira cómo juega 👀' })));
+  $('#fxTop').append(el);
+  setTimeout(() => el.remove(), 2300);
 }
 
 function afterState(prev, g) {
   autoSave(prev, g);
   // c'est mon tour
+  if (prev && g.status === 'playing' && !g.card && prev.card && g.turn !== prev.turn && !g.done[g.turn]) turnBanner(g.turn);
   if (g.status === 'playing' && !g.card && g.turn === S.me && (!prev || prev.turn !== S.me || prev.card)) {
     sfx.play('notify');
     sfx.buzz(30);
@@ -346,7 +388,7 @@ async function openCard(g, instant) {
   const z = cardSize();
   const isMeta = c.n === R.LAST;
   const back = h('div', { class: 'face back' }, h('div', { class: 'card', id: 'cardBody' }));
-  const front = h('div', { class: 'face front' }, h('img', { alt: '', src: isMeta ? 'assets/stickers/heart.webp' : `assets/tiles/face_${pad(c.n)}.webp` }));
+  const front = h('div', { class: 'face front' }, h('img', { alt: '', src: isMeta ? 'assets/stickers/heart.webp' : faceUrl(c.n) }));
   const flip = h('div', { class: 'flip' }, front, back);
   const flyer = h('div', { class: 'flyer' + (isMeta ? ' meta' : '') }, flip);
   Object.assign(flyer.style, { left: z.x + 'px', top: z.y + 'px', width: z.w + 'px', height: z.h + 'px' });
@@ -438,6 +480,8 @@ async function renderCard(g) {
     return;
   }
   clear(oc.body);
+  const mq = g.card.qid && QBY[g.card.qid];
+  oc.body.className = 'card' + (mq && g.card.phase !== 'mg' ? ' m-' + mq.mood : '');
   oc.body.append(...cardView(g));
   oc.body.scrollTop = 0;
   if (g.card.phase === 'result' && prevPhase !== 'result') celebrate(g);
@@ -470,9 +514,12 @@ function cardHead(g) {
   const badge = c.type === 'vr' && c.vr ? { text: c.vr === 'verdad' ? 'Verdad' : 'Reto', cls: 'b-vr' } : TYPE_BADGE[c.type] || { text: '', cls: '' };
   // l'intitule de la case n'est repete en titre que s'il differe de la question
   const sameAsQ = ['sincero', 'foto', 'back2'].includes(c.type) && c.phase !== 'mg';
+  const mood = c.qid && QBY[c.qid] && c.phase !== 'mg' ? MOODS[QBY[c.qid].mood] : null;
   return h('div', { class: 'card-head' },
-    h('span', { class: `badge ${badge.cls}`, text: badge.text }),
-    sameAsQ ? null : h('div', { class: 'card-tile', text: c.type === 'meta' ? 'META' : t.label }),
+    h('div', { class: 'badges' },
+      h('span', { class: `badge ${badge.cls}`, text: badge.text }),
+      mood && c.type !== 'foto' ? h('span', { class: 'mood', text: `${mood.icon} ${mood.name}` }) : null),
+    sameAsQ ? null : h('div', { class: 'card-tile', text: c.type === 'meta' ? 'META' : c.label || t.label }),
     h('span', { class: `who tok tok-${c.by}`, text: c.by, title: NAME(c.by) }));
 }
 
@@ -570,6 +617,12 @@ function cardView(g) {
 
     case 'answer': {
       main.append(questionBlock(g));
+      if (R.canReroll(g, me)) {
+        main.append(h('button', {
+          class: 'reroll', title: 'Cambiar la pregunta (una vez por partida)',
+          onclick: (e) => { e.currentTarget.disabled = true; sfx.play('tick'); net.act((x) => R.reroll(x, me)); },
+        }, h('span', { class: 'rr-i', text: '🔄' }), h('span', { text: 'Otra pregunta' }), h('small', { text: '1 por partida' })));
+      }
       if (c.type === 'foto') {
         if (isL) {
           const preview = h('img', { class: 'photo', alt: '', hidden: true });
@@ -788,6 +841,19 @@ function showLobby() {
   const g = S.game;
   let first = 'rand';
   let endMode = (g && g.endMode) || 'both';
+  let qmode = load('qmode') || 'nuevas';
+  if (!QMODES.some((m) => m.id === qmode)) qmode = 'nuevas';
+  const qhint = h('p', { class: 'note qhint' });
+  const qgrid = h('div', { class: 'qmodes' });
+  const drawQ = () => {
+    clear(qgrid);
+    for (const m of QMODES) {
+      qgrid.append(h('button', { class: 'qm' + (m.id === qmode ? ' on' : ''), onclick: () => { qmode = m.id; store('qmode', m.id); sfx.play('tick'); drawQ(); } },
+        h('span', { class: 'qm-i', text: m.icon }), h('span', { text: m.name })));
+    }
+    qhint.textContent = QMODES.find((m) => m.id === qmode).hint;
+  };
+  drawQ();
   const seg = (opts, get, set) => {
     const wrap = h('div', { class: 'seg' });
     const draw = () => {
@@ -809,6 +875,8 @@ function showLobby() {
     seg([['A', NAME('A')], ['rand', 'Al azar 🎲'], ['J', NAME('J')]], () => first, (v) => { first = v; }),
     h('label', { text: '¿Cuándo termina?' }),
     seg([['both', 'Cuando los dos llegan'], ['first', 'Cuando llega el primero']], () => endMode, (v) => { endMode = v; }),
+    h('label', { text: 'Preguntas de las casillas' }),
+    qgrid, qhint,
     (deckA || deckJ) ? h('p', { class: 'note', text: `Preguntas nuevas para «Verdad»: ${deckA} de ${NAME('A')} · ${deckJ} de ${NAME('J')}` }) : null,
     h('button', {
       class: 'btn big', text: '¡Empezar! 💘', onclick: async (e) => {
@@ -816,7 +884,7 @@ function showLobby() {
         sfx.unlock();
         const f = first === 'rand' ? (Math.random() < 0.5 ? 'A' : 'J') : first;
         if (S.game && S.game.log.length) await net.archive(S.game);
-        await net.writeGame(R.newGame(S.game, { endMode, first: f }));
+        await net.writeGame(R.newGame(S.game, { endMode, first: f, qmode }));
         S.lobbyForced = false;
         hide('lobby');
         hide('end');
@@ -872,8 +940,8 @@ function showHistory() {
     const t = BOARD.tiles[l.n];
     const pts = Object.entries(l.pts || {}).filter(([, v]) => v > 0).map(([k, v]) => `+${v} ${PLAYERS[k].short}`).join(' ');
     const item = h('div', { class: 'hist-item' },
-      h('div', { class: 'hist-top' }, h('span', { class: `tok tok-${l.by}`, text: l.by }), h('b', { text: t.label }), h('span', { class: 'pts', text: pts || '—' })),
-      l.q && l.q !== t.label ? h('div', { class: 'hist-q', text: l.q }) : null,
+      h('div', { class: 'hist-top' }, h('span', { class: `tok tok-${l.by}`, text: l.by }), h('b', { text: tileLabel(l) }), h('span', { class: 'pts', text: pts || '—' })),
+      l.q && l.q !== tileLabel(l) ? h('div', { class: 'hist-q', text: l.q }) : null,
       l.a ? h('div', { class: 'hist-a', text: `«${l.a}»` }) : null,
       h('small', { class: l.ok ? 'ok' : 'ko', text: l.ok ? '✓ vale' : l.skip ? '⏭️ carta cerrada' : l.mg ? mgLine(l) : '✗ no vale' }));
     if (l.photo) {
@@ -1022,7 +1090,7 @@ function autoSave(prev, g) {
     if (g.status === 'ended' && prev.status !== 'ended') { net.saveSnapshot(g, 'Fin de la partida'); return; }
     if (prev.card && !g.card && g.log.length) {
       const l = g.log[g.log.length - 1];
-      net.saveSnapshot(g, `Turno ${g.log.length} · ${NAME(l.by)} en «${BOARD.tiles[l.n].label}»`);
+      net.saveSnapshot(g, `Turno ${g.log.length} · ${NAME(l.by)} en «${tileLabel(l)}»`);
     }
   } catch (e) { console.warn('sauvegarde', e); }
 }

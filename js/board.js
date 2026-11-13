@@ -1,11 +1,12 @@
 // Plateau : fond, stickers animes, effets d'ambiance, pions, camera (zoom),
 // creux des dalles soulevees.
-import { BOARD } from './board-data.js?v=202611122255';
-import { h, $, sleep, clamp, rint, reducedMotion } from './util.js?v=202611122255';
-import { play } from './sfx.js?v=202611122255';
+import { BOARD } from './board-data.js?v=202611131305';
+import { h, $, sleep, clamp, rint, reducedMotion } from './util.js?v=202611131305';
+import { play } from './sfx.js?v=202611131305';
 
 const T = BOARD.tiles;
-let root, viewport, board, pawnsEl, holesEl, fxEl, hlEl;
+let root, viewport, board, pawnsEl, holesEl, fxEl, hlEl, varEl;
+let tileFaces = {}; // dalles dont la question a change : n -> image
 const pawns = {};
 const cam = { s: 1, x: 0, y: 0, follow: false };
 let fullRes = false;
@@ -27,6 +28,9 @@ export function mountBoard(container) {
     src: 'assets/board-sm.webp',
   });
   board.append(base);
+  // faces des dalles tirees pour cette partie (par-dessus le fond, sous les stickers)
+  varEl = h('div', { class: 'tvar' });
+  board.append(varEl);
   // effets sous les stickers (pouls, lueurs)
   fxEl = h('div', { class: 'fx' });
   board.append(fxEl);
@@ -240,6 +244,8 @@ export function showHole(n, on) {
       style: { left: pct(t.box[0]), top: pct(t.box[1]), width: pct(t.box[2]), height: pct(t.box[3]) } });
     holesEl.append(el);
   } else if (!on && el) el.remove();
+  const v = varEl.querySelector(`[data-n="${n}"]`);
+  if (v) v.classList.toggle('up', !!on);
   for (const name of ATTACHED[n] || []) {
     const s = board.querySelector(`.stk-${name}`);
     if (s) s.classList.toggle('lifted-away', !!on);
@@ -250,10 +256,36 @@ export function showHole(n, on) {
 export function settleTile(n) {
   if (n >= T.length - 1) return;
   const t = T[n];
-  const el = h('img', { class: 'settle', src: `assets/tiles/face_${String(n).padStart(2, '0')}.webp`, alt: '',
+  const el = h('img', { class: 'settle', src: tileFaces[n] || `assets/tiles/face_${String(n).padStart(2, '0')}.webp`, alt: '',
     style: { left: pct(t.box[0]), top: pct(t.box[1]), width: pct(t.box[2]), height: pct(t.box[3]) } });
   hlEl.append(el);
   setTimeout(() => el.remove(), 700);
+}
+
+/** Pose sur le plateau les dalles dont la question a change ({ n: image }). */
+export function setTileFaces(map) {
+  tileFaces = { ...map };
+  const keep = new Set();
+  let i = 0;
+  for (const [k, src] of Object.entries(tileFaces)) {
+    const t = T[k];
+    keep.add(String(k));
+    let el = varEl.querySelector(`[data-n="${k}"]`);
+    if (!el) {
+      el = h('img', { class: 'tv', alt: '', draggable: 'false',
+        style: { left: pct(t.box[0]), top: pct(t.box[1]), width: pct(t.box[2]), height: pct(t.box[3]) } });
+      el.dataset.n = k;
+      varEl.append(el);
+    }
+    if (el.getAttribute('src') !== src) {
+      el.style.setProperty('--i', i++);
+      el.src = src;
+      el.classList.remove('new');
+      void el.offsetWidth;
+      el.classList.add('new');
+    }
+  }
+  varEl.querySelectorAll('.tv').forEach((el) => { if (!keep.has(el.dataset.n)) el.remove(); });
 }
 
 export function highlightTile(n, on) {
