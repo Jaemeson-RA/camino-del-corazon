@@ -1,9 +1,9 @@
 // Regles du jeu : fonctions pures (etat -> nouvel etat) utilisees dans les
 // transactions Firebase. Chaque action renvoie le nouvel etat, ou null si
 // l'action n'est pas permise (la transaction est alors abandonnee).
-import { BOARD } from './board-data.js?v=202611122242';
-import { VERDADES, RETOS, PALABRAS, other, fill } from './content.js?v=202611122242';
-import { uid, rint, pick, plain } from './util.js?v=202611122242';
+import { BOARD } from './board-data.js?v=202611122255';
+import { VERDADES, RETOS, PALABRAS, other, fill } from './content.js?v=202611122255';
+import { uid, rint, pick, plain } from './util.js?v=202611122255';
 
 export const LAST = BOARD.tiles.length - 1; // case META
 const arr = (v) => (Array.isArray(v) ? v.filter((x) => x != null) : v && typeof v === 'object' ? Object.values(v) : []);

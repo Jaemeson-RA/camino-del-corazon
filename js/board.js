@@ -1,8 +1,8 @@
 // Plateau : fond, stickers animes, effets d'ambiance, pions, camera (zoom),
 // creux des dalles soulevees.
-import { BOARD } from './board-data.js?v=202611122242';
-import { h, $, sleep, clamp, rint, reducedMotion } from './util.js?v=202611122242';
-import { play } from './sfx.js?v=202611122242';
+import { BOARD } from './board-data.js?v=202611122255';
+import { h, $, sleep, clamp, rint, reducedMotion } from './util.js?v=202611122255';
+import { play } from './sfx.js?v=202611122255';
 
 const T = BOARD.tiles;
 let root, viewport, board, pawnsEl, holesEl, fxEl, hlEl;

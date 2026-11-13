@@ -1,16 +1,16 @@
 // Chef d'orchestre : ecrans, HUD, cartes retournees, enchainement des animations.
-import { BOARD } from './board-data.js?v=202611122242';
-import { h, $, $$, sleep, clear, uid, rint } from './util.js?v=202611122242';
-import { PLAYERS, other, TYPE_BADGE, RULES, MINIJUEGOS } from './content.js?v=202611122242';
-import * as R from './rules.js?v=202611122242';
-import * as net from './net.js?v=202611122242';
-import * as sfx from './sfx.js?v=202611122242';
+import { BOARD } from './board-data.js?v=202611122255';
+import { h, $, $$, sleep, clear, uid, rint } from './util.js?v=202611122255';
+import { PLAYERS, other, TYPE_BADGE, RULES, MINIJUEGOS } from './content.js?v=202611122255';
+import * as R from './rules.js?v=202611122255';
+import * as net from './net.js?v=202611122255';
+import * as sfx from './sfx.js?v=202611122255';
 import {
   mountBoard, placePawns, movePawn, pawnBurst, tileRect, showHole, settleTile, highlightTile,
   heartBeatBig, followPawn, setZoom, isSmall, toggleZoom, isZoomed,
-} from './board.js?v=202611122242';
-import { mountDice, rollTo, setDice } from './dice.js?v=202611122242';
-import { renderMG, roulette, mgSummary } from './minigames.js?v=202611122242';
+} from './board.js?v=202611122255';
+import { mountDice, rollTo, setDice } from './dice.js?v=202611122255';
+import { renderMG, roulette, mgSummary } from './minigames.js?v=202611122255';
 
 const S = {
   roomKey: '', me: '', room: null, game: null, presence: {},
@@ -107,6 +107,7 @@ function mountUI() {
     h('button', { class: 'btn roll', id: 'roll', disabled: true, onclick: doRoll }, h('span', { text: '🎲' }), h('span', { text: 'Lanzar los dados' })),
     h('div', { class: 'last', id: 'last' }),
     h('div', { class: 'tools' },
+      h('button', { class: 'tool', id: 'tFull', title: 'Pantalla completa', onclick: () => goFullscreen(), text: '⛶', hidden: true }),
       h('button', { class: 'tool', id: 'tZoom', title: 'Zoom', onclick: () => toggleZoom(S.me || 'A'), text: '🔍' }),
       h('button', { class: 'tool', title: 'Nuestras respuestas', onclick: showHistory, text: '📜' }),
       h('button', { class: 'tool', title: 'Reglas', onclick: showRules, text: '📖' }),
@@ -123,9 +124,13 @@ function mountUI() {
       h('button', { class: 'back-to-card', id: 'backToCard', onclick: () => setPeek(false) }, h('span', { text: '🃏' }), h('span', { text: 'Volver a la carta' }))),
     h('div', { class: 'fx-top', id: 'fxTop' }),
     h('div', { class: 'toast', id: 'toast' }),
-    h('div', { class: 'net-off', text: 'Sin conexión… reconectando' }));
-  addEventListener('resize', () => { if (S.card) placeCardFinal(); });
+    h('div', { class: 'net-off', text: 'Sin conexión… reconectando' }),
+    rotateScreen());
+  addEventListener('resize', () => { if (S.card) placeCardFinal(); checkOrientation(); });
+  addEventListener('orientationchange', () => setTimeout(checkOrientation, 250));
+  document.addEventListener('fullscreenchange', checkOrientation);
   if (window.visualViewport) visualViewport.addEventListener('resize', () => { if (S.card) placeCardFinal(); });
+  checkOrientation();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Camino del Corazón'; });
 }
 
@@ -300,10 +305,13 @@ function cardSize() {
   const vv = window.visualViewport;
   const vw = vv ? vv.width : innerWidth;
   const vh = vv ? vv.height : innerHeight;
+  // clavier ouvert (surtout a l'horizontale) : la carte prend toute la place visible
+  const kb = !!vv && vv.height < innerHeight * 0.72;
   let w = Math.min(420, vw * 0.9);
   let hh = Math.min(w * 1.58, vh * 0.9);
   if (hh < w * 1.25) w = Math.max(Math.min(w, hh / 1.25), Math.min(300, vw * 0.9));
-  return { w, h: hh, x: (vv ? vv.offsetLeft : 0) + (vw - w) / 2, y: (vv ? vv.offsetTop : 0) + (vh - hh) / 2 };
+  if (kb) { w = Math.min(560, vw * 0.96); hh = Math.max(120, vh - 10); }
+  return { w, h: hh, kb, x: (vv ? vv.offsetLeft : 0) + (vw - w) / 2, y: (vv ? vv.offsetTop : 0) + (vh - hh) / 2 };
 }
 
 function placeCardFinal() {
@@ -311,6 +319,7 @@ function placeCardFinal() {
   if (!c) return;
   const z = cardSize();
   Object.assign(c.flyer.style, { left: z.x + 'px', top: z.y + 'px', width: z.w + 'px', height: z.h + 'px' });
+  c.flyer.classList.toggle('kb', z.kb);
 }
 
 function sourceRect(n) {
@@ -349,6 +358,7 @@ async function openCard(g, instant) {
   if (isMeta) $('.stk-heart').classList.add('lifted-away');
   $('#backdrop').classList.add('on');
   document.body.classList.add('card-open');
+  checkOrientation();
   if (instant) { flip.style.transform = 'rotateY(180deg)'; return; }
   const { start, lift } = flyTransforms(c.n, z);
   sfx.play('flip');
@@ -374,6 +384,7 @@ async function closeCard(instant) {
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
   $('#backdrop').classList.remove('on');
   document.body.classList.remove('card-open');
+  checkOrientation();
   if (!instant) {
     const z = { x: parseFloat(c.flyer.style.left), y: parseFloat(c.flyer.style.top), w: parseFloat(c.flyer.style.width), h: parseFloat(c.flyer.style.height) };
     const { start, lift } = flyTransforms(c.n, z);
@@ -483,6 +494,8 @@ function textBox(placeholder, onType) {
     const t = Date.now();
     if (t - S.typingAt > 2500) { S.typingAt = t; onType && onType(); }
   });
+  // le clavier du telephone ne doit pas cacher la zone de saisie
+  ta.addEventListener('focus', () => setTimeout(() => { placeCardFinal(); ta.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 350));
   return ta;
 }
 
@@ -883,6 +896,45 @@ function setPeek(on) {
   S.peek = !!on && !!S.card;
   $('#cardLayer').classList.toggle('peek', S.peek);
   document.body.classList.toggle('card-open', !!S.card && !S.peek);
+  checkOrientation();
+}
+
+// ------------------------------------------------------------------ telephone : on joue a l'horizontale
+const isPhone = () => matchMedia('(pointer: coarse)').matches && Math.min(window.screen.width, window.screen.height) < 620;
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canFullscreen = () => !!(document.documentElement.requestFullscreen && document.fullscreenEnabled);
+
+async function goFullscreen() {
+  sfx.unlock();
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    if (window.screen.orientation && window.screen.orientation.lock) await window.screen.orientation.lock('landscape');
+  } catch (e) { /* refuse par le navigateur : la consigne de rotation reste affichee */ }
+  checkOrientation();
+}
+
+function rotateScreen() {
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  return h('div', { class: 'rotate', id: 'rotate' },
+    h('div', { class: 'rotate-phone' }, h('i'), h('span', { text: '♥' })),
+    h('h2', { text: 'Gira el teléfono' }),
+    h('p', { text: 'El tablero se juega en horizontal, en pantalla completa.' }),
+    canFullscreen() && !isIOS() ? h('button', { class: 'btn big', text: '⛶ Pantalla completa', onclick: goFullscreen }) : null,
+    isIOS() && !standalone ? h('p', { class: 'rotate-tip', text: 'Consejo: para jugar sin las barras de Safari, toca Compartir → «Agregar a inicio» y abre el juego desde el ícono 💘.' }) : null,
+    isIOS() ? h('p', { class: 'rotate-tip', text: 'Si no gira, desactiva el bloqueo de rotación en el Centro de control.' }) : null);
+}
+
+/** En portrait sur telephone : consigne de rotation (sauf pendant qu'une carte est ouverte). */
+function checkOrientation() {
+  const el = document.getElementById('rotate');
+  if (!el) return;
+  const portrait = innerHeight > innerWidth;
+  const cardShown = !!S.card && !S.peek;
+  const show = isPhone() && portrait && !cardShown;
+  el.classList.toggle('on', show);
+  document.body.classList.toggle('phone', isPhone());
+  const full = document.getElementById('tFull');
+  if (full) full.hidden = !(isPhone() && canFullscreen() && !isIOS() && !document.fullscreenElement);
 }
 
 const opt = (icon, label, sub, fn, cls = '') => h('button', { class: `opt ${cls}`, onclick: fn },

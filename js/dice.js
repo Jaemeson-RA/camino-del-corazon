@@ -1,6 +1,6 @@
 // Deux des 3D en CSS, avec de vrais points.
-import { h, rint, reducedMotion } from './util.js?v=202611122242';
-import { play, buzz } from './sfx.js?v=202611122242';
+import { h, rint, reducedMotion } from './util.js?v=202611122255';
+import { play, buzz } from './sfx.js?v=202611122255';
 
 const PIPS = {
   1: [5], 2: [1, 9], 3: [1, 5, 9], 4: [1, 3, 7, 9], 5: [1, 3, 5, 7, 9], 6: [1, 3, 4, 6, 7, 9],
