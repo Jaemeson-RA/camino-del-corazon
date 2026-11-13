@@ -1,9 +1,9 @@
 // Regles du jeu : fonctions pures (etat -> nouvel etat) utilisees dans les
 // transactions Firebase. Chaque action renvoie le nouvel etat, ou null si
 // l'action n'est pas permise (la transaction est alors abandonnee).
-import { BOARD } from './board-data.js?v=202611122220';
-import { VERDADES, RETOS, PALABRAS, other, fill } from './content.js?v=202611122220';
-import { uid, rint, pick, plain } from './util.js?v=202611122220';
+import { BOARD } from './board-data.js?v=202611122242';
+import { VERDADES, RETOS, PALABRAS, other, fill } from './content.js?v=202611122242';
+import { uid, rint, pick, plain } from './util.js?v=202611122242';
 
 export const LAST = BOARD.tiles.length - 1; // case META
 const arr = (v) => (Array.isArray(v) ? v.filter((x) => x != null) : v && typeof v === 'object' ? Object.values(v) : []);
@@ -189,7 +189,7 @@ function endTurn(g) {
     g.log.push({
       n: c.n, by: c.by, type: c.type, vr: c.vr || '', q: c.q || '', a: c.answer || '',
       photo: c.photo || '', ok: !!c.ok, mg: g.mg ? g.mg.type : '', mgres: g.mg ? g.mg.res || '' : '',
-      pts: c.pts || {}, author: c.author || '',
+      pts: c.pts || {}, author: c.author || '', skip: !!c.skipped,
     });
   }
   delete g.card;
@@ -203,6 +203,41 @@ function endTurn(g) {
     if (!g.done[o]) g.turn = o;
   }
   return bump(g);
+}
+
+// ------------------------------------------------------------------ options de Jaemeson
+/** Ferme la carte en cours sans donner de points (carte bloquee, erreur...). */
+export function skipCard(g0) {
+  const g = norm(g0);
+  if (!g || !g.card) return null;
+  const c = g.card;
+  if (c.type !== 'meta') { c.pts = {}; c.ok = false; c.skipped = true; }
+  if (g.mg) g.mg.res = g.mg.res || '';
+  return endTurn(g);
+}
+
+/** Corrige un score a la main (jamais sous zero). */
+export function adjustScore(g0, k, delta) {
+  const g = norm(g0);
+  if (!g || !['A', 'J'].includes(k)) return null;
+  g.score[k] = Math.max(0, g.score[k] + delta);
+  return bump(g);
+}
+
+/** Donne la main a un joueur (quand aucune carte n'est ouverte). */
+export function setTurn(g0, k) {
+  const g = norm(g0);
+  if (!g || g.status !== 'playing' || g.card || g.done[k] || g.turn === k) return null;
+  g.turn = k;
+  return bump(g);
+}
+
+/** Restaure une sauvegarde : nouvel identifiant de rendu pour tout redessiner sans animation. */
+export function restored(save) {
+  const g = norm(save);
+  g.rk = 'r' + uid(8);
+  g.n = (g.n || 0) + 1;
+  return g;
 }
 
 export function setNewQ(g0, me, list) {

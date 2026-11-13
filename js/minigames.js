@@ -1,9 +1,9 @@
 // Interface des minijeux (affiches dans la carte retournee).
 // La logique est dans rules.js (mgAct) ; ici on dessine et on envoie les actions.
-import { h, clear, sleep, pick, plain } from './util.js?v=202611122220';
-import { PLAYERS, MINIJUEGOS } from './content.js?v=202611122220';
-import { HANG_MAX, NUM_MAX, hangLetters, randomWord, MG_TYPES } from './rules.js?v=202611122220';
-import { play } from './sfx.js?v=202611122220';
+import { h, clear, sleep, pick, plain } from './util.js?v=202611122242';
+import { PLAYERS, MINIJUEGOS } from './content.js?v=202611122242';
+import { HANG_MAX, NUM_MAX, hangLetters, randomWord, MG_TYPES } from './rules.js?v=202611122242';
+import { play } from './sfx.js?v=202611122242';
 
 const HAND = { piedra: '✊', papel: '✋', tijera: '✌️' };
 const HAND_NAME = { piedra: 'Piedra', papel: 'Papel', tijera: 'Tijera' };

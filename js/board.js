@@ -1,8 +1,8 @@
 // Plateau : fond, stickers animes, effets d'ambiance, pions, camera (zoom),
 // creux des dalles soulevees.
-import { BOARD } from './board-data.js?v=202611122220';
-import { h, $, sleep, clamp, rint, reducedMotion } from './util.js?v=202611122220';
-import { play } from './sfx.js?v=202611122220';
+import { BOARD } from './board-data.js?v=202611122242';
+import { h, $, sleep, clamp, rint, reducedMotion } from './util.js?v=202611122242';
+import { play } from './sfx.js?v=202611122242';
 
 const T = BOARD.tiles;
 let root, viewport, board, pawnsEl, holesEl, fxEl, hlEl;
@@ -45,7 +45,10 @@ export function mountBoard(container) {
   pawnsEl = h('div', { class: 'pawns' });
   board.append(holesEl, hlEl, pawnsEl);
   for (const k of ['A', 'J']) {
-    const p = h('div', { class: `pawn pawn-${k}` }, h('div', { class: 'pawn-shadow' }), h('div', { class: 'pawn-body' }, h('span', { text: k })));
+    const p = h('div', { class: `pawn pawn-${k}`, title: k === 'A' ? 'Alejandra' : 'Jaemeson' },
+      h('div', { class: 'pawn-ring' }),
+      h('div', { class: 'pawn-shadow' }),
+      h('div', { class: 'pawn-body' }, h('img', { class: 'pawn-img', src: `assets/pawn-${k}.webp`, alt: k, draggable: 'false' })));
     pawns[k] = p;
     pawnsEl.append(p);
   }
@@ -153,12 +156,22 @@ export async function movePawn(k, from, to, pos, onStep) {
     const [x0, y0] = pawnSpot(n, k, null);
     const isLast = nxt === to;
     const [x1, y1] = isLast ? pawnSpot(nxt, k, pos) : pawnSpot(nxt, k, null);
-    const dur = reducedMotion() ? 90 : 300;
+    const dur = reducedMotion() ? 90 : 340;
+    // la figurine monte en arc ; le corps s'etire au decollage et s'ecrase a l'atterrissage
     const anim = p.animate([
-      { left: pct(x0), top: pct(y0), transform: 'translate(-50%, -100%) translateY(0) scale(1)' },
-      { left: pct((x0 + x1) / 2), top: pct((y0 + y1) / 2), transform: 'translate(-50%, -100%) translateY(-38%) scale(1.08)', offset: 0.5 },
-      { left: pct(x1), top: pct(y1), transform: 'translate(-50%, -100%) translateY(0) scale(1, 0.92)', offset: 0.85 },
-      { left: pct(x1), top: pct(y1), transform: 'translate(-50%, -100%) translateY(0) scale(1)' },
+      { left: pct(x0), top: pct(y0) },
+      { left: pct(x1), top: pct(y1) },
+    ], { duration: dur, easing: 'cubic-bezier(.45,.05,.55,.95)' });
+    const body = p.querySelector('.pawn-body');
+    body.animate([
+      { transform: 'translateY(0) scale(1, 1)' },
+      { transform: 'translateY(-4%) scale(.9, 1.1)', offset: 0.14 },
+      { transform: 'translateY(-46%) scale(1, 1)', offset: 0.5 },
+      { transform: 'translateY(0) scale(1.14, .84)', offset: 0.86 },
+      { transform: 'translateY(0) scale(1, 1)' },
+    ], { duration: dur, easing: 'ease-in-out' });
+    p.querySelector('.pawn-shadow').animate([
+      { transform: 'scale(1)', opacity: 1 }, { transform: 'scale(.55)', opacity: 0.45, offset: 0.5 }, { transform: 'scale(1)', opacity: 1 },
     ], { duration: dur, easing: 'ease-in-out' });
     p.style.left = pct(x1);
     p.style.top = pct(y1);
@@ -166,6 +179,7 @@ export async function movePawn(k, from, to, pos, onStep) {
     play('step', n);
     onStep && onStep(nxt);
     await anim.finished.catch(() => {});
+    puff(x1, y1, k, nxt === to);
   }
   p.classList.remove('moving');
   // l'autre pion se decale si les deux partagent la case
@@ -173,6 +187,29 @@ export async function movePawn(k, from, to, pos, onStep) {
   const [ox, oy] = pawnSpot(pos[o] || 0, o, pos);
   pawns[o].style.left = pct(ox);
   pawns[o].style.top = pct(oy);
+}
+
+/** Petits coeurs souleves a l'atterrissage (plus nombreux sur la case finale). */
+function puff(x, y, k, big) {
+  if (reducedMotion()) return;
+  const n = big ? 9 : 3;
+  const color = k === 'A' ? '#f2588c' : '#3a9be0';
+  for (let i = 0; i < n; i++) {
+    const a = (Math.PI * (i + 0.5)) / n + Math.PI; // eventail vers le haut
+    const d = big ? 2.4 + Math.random() * 1.6 : 1.2 + Math.random() * 0.8;
+    const el = h('span', { class: 'puff', text: '♥', style: { left: pct(x), top: pct(y), color: i % 3 === 0 ? '#ffffff' : color } });
+    pawnsEl.append(el);
+    const bw = board.clientWidth;
+    el.animate([
+      { transform: 'translate(-50%,-50%) scale(.3)', opacity: 1 },
+      { transform: `translate(calc(-50% + ${Math.cos(a) * d * bw / 100}px), calc(-50% + ${Math.sin(a) * d * bw / 100 * 0.7}px)) scale(1)`, opacity: 0 },
+    ], { duration: big ? 900 : 520, easing: 'cubic-bezier(.2,.7,.3,1)' }).finished.then(() => el.remove());
+  }
+  if (big) {
+    const ring = h('span', { class: 'land-ring', style: { left: pct(x), top: pct(y), borderColor: color } });
+    pawnsEl.append(ring);
+    setTimeout(() => ring.remove(), 900);
+  }
 }
 
 export function pawnBurst(k, text) {

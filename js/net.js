@@ -1,9 +1,10 @@
-// Synchro temps reel : Firebase Realtime Database (projet viaje-del-amor,
-// compte jaemeson.dieu@gmail.com). Une partie = corazon/<cle de salle>.
+// Synchro temps reel : Firebase Realtime Database (projet viaje-del-amor).
+// Une partie = corazon/<cle de salle>.
 // La cle n'est jamais dans le code : elle vient du lien partage (#s=...).
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
 import {
   getDatabase, ref, onValue, runTransaction, set, get, onDisconnect, serverTimestamp,
+  query, orderByKey, limitToLast, limitToFirst, remove,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
 const firebaseConfig = {
@@ -80,6 +81,44 @@ export function savePhoto(id, dataUrl) { return set(ref(db, P(`-fotos/${id}`)), 
 export async function loadPhoto(id) {
   const s = await get(ref(db, P(`-fotos/${id}`)));
   return s.val() || '';
+}
+
+// ------------------------------------------------------------------ sauvegardes
+// corazon/<cle>-saves/<cle chronologique> : copie complete de la partie.
+// La cle est deterministe (debut de partie + compteur d'actions) : si les deux
+// telephones sauvegardent le meme instant, ils ecrivent la meme entree.
+const MAX_SAVES = 60;
+const pad = (n, w) => String(n).padStart(w, '0');
+
+export function saveKey(g, tag = '') {
+  return `t${pad(g.startedAt || 0, 13)}_${pad(g.n || 0, 5)}${tag ? '_' + tag : ''}`;
+}
+
+export async function saveSnapshot(g, label, tag = '') {
+  if (!g || !g.id) return;
+  const key = saveKey(g, tag);
+  await set(ref(db, P(`-saves/${key}`)), clean({
+    at: Date.now(), label: label || '', gid: g.id, n: g.n || 0,
+    score: g.score || {}, pos: g.pos || {}, turn: g.turn || '', status: g.status || '', game: g,
+  }));
+  // menage : on garde les MAX_SAVES plus recentes
+  if (Math.random() < 0.15) {
+    const all = await get(query(ref(db, P('-saves')), orderByKey(), limitToFirst(40)));
+    const keys = Object.keys(all.val() || {});
+    const cnt = await get(query(ref(db, P('-saves')), orderByKey(), limitToLast(MAX_SAVES + 1)));
+    const recent = Object.keys(cnt.val() || {});
+    if (recent.length > MAX_SAVES) {
+      const oldestKept = recent[recent.length - MAX_SAVES];
+      for (const k of keys) if (k < oldestKept) remove(ref(db, P(`-saves/${k}`))).catch(() => {});
+    }
+  }
+}
+
+/** Les sauvegardes les plus recentes d'abord. */
+export async function listSaves(n = 30) {
+  const s = await get(query(ref(db, P('-saves')), orderByKey(), limitToLast(n)));
+  const v = s.val() || {};
+  return Object.keys(v).sort().reverse().map((k) => ({ key: k, ...v[k] }));
 }
 
 export function archive(g) {

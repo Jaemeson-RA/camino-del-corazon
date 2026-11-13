@@ -1,16 +1,16 @@
 // Chef d'orchestre : ecrans, HUD, cartes retournees, enchainement des animations.
-import { BOARD } from './board-data.js?v=202611122220';
-import { h, $, $$, sleep, clear, uid, rint } from './util.js?v=202611122220';
-import { PLAYERS, other, TYPE_BADGE, RULES, MINIJUEGOS } from './content.js?v=202611122220';
-import * as R from './rules.js?v=202611122220';
-import * as net from './net.js?v=202611122220';
-import * as sfx from './sfx.js?v=202611122220';
+import { BOARD } from './board-data.js?v=202611122242';
+import { h, $, $$, sleep, clear, uid, rint } from './util.js?v=202611122242';
+import { PLAYERS, other, TYPE_BADGE, RULES, MINIJUEGOS } from './content.js?v=202611122242';
+import * as R from './rules.js?v=202611122242';
+import * as net from './net.js?v=202611122242';
+import * as sfx from './sfx.js?v=202611122242';
 import {
   mountBoard, placePawns, movePawn, pawnBurst, tileRect, showHole, settleTile, highlightTile,
   heartBeatBig, followPawn, setZoom, isSmall, toggleZoom, isZoomed,
-} from './board.js?v=202611122220';
-import { mountDice, rollTo, setDice } from './dice.js?v=202611122220';
-import { renderMG, roulette, mgSummary } from './minigames.js?v=202611122220';
+} from './board.js?v=202611122242';
+import { mountDice, rollTo, setDice } from './dice.js?v=202611122242';
+import { renderMG, roulette, mgSummary } from './minigames.js?v=202611122242';
 
 const S = {
   roomKey: '', me: '', room: null, game: null, presence: {},
@@ -117,7 +117,10 @@ function mountUI() {
   dice = mountDice($('#tray'));
   // couche des cartes
   document.body.append(
-    h('div', { class: 'card-layer', id: 'cardLayer' }, h('div', { class: 'backdrop', id: 'backdrop' })),
+    h('div', { class: 'card-layer', id: 'cardLayer' },
+      // toucher a cote de la carte ouvre le menu d'options
+      h('div', { class: 'backdrop', id: 'backdrop', onclick: () => showMenu() }),
+      h('button', { class: 'back-to-card', id: 'backToCard', onclick: () => setPeek(false) }, h('span', { text: '🃏' }), h('span', { text: 'Volver a la carta' }))),
     h('div', { class: 'fx-top', id: 'fxTop' }),
     h('div', { class: 'toast', id: 'toast' }),
     h('div', { class: 'net-off', text: 'Sin conexión… reconectando' }));
@@ -132,7 +135,7 @@ function renderHUD() {
   for (const k of ['A', 'J']) {
     const c = $(`#chip-${k}`);
     c.querySelector('.score').textContent = g ? g.score[k] : 0;
-    c.querySelector('.where').textContent = !g ? '' : g.done[k] ? '💘 en el corazón' : g.pos[k] === 0 ? 'en el inicio' : `casilla ${g.pos[k]} de ${R.LAST}`;
+    c.querySelector('.where').textContent = !g ? '' : g.done[k] ? '💘 en el corazón' : g.pos[k] === 0 ? 'en el inicio' : `casilla ${g.pos[k]}/${R.LAST}`;
     c.classList.toggle('is-turn', !!g && g.status === 'playing' && g.turn === k && !g.done[k]);
     c.classList.toggle('me', S.me === k);
     c.classList.toggle('online', !!(S.presence[k] && S.presence[k].on));
@@ -223,11 +226,11 @@ async function run() {
 }
 
 async function transition(prev, g) {
-  // premier affichage ou nouvelle partie : pas d'animation
-  if (!prev || prev.id !== g.id) {
+  // premier affichage, nouvelle partie ou sauvegarde restauree : pas d'animation
+  if (!prev || prev.id !== g.id || (prev.rk || '') !== (g.rk || '')) {
     if (S.card) await closeCard(true);
     placePawns(g.pos, g.turn);
-    if (g.dice) setDice(dice, g.dice.d1, g.dice.d2);
+    if (g.dice) { setDice(dice, g.dice.d1, g.dice.d2); $('#tray').dataset.sum = `= ${g.dice.d1 + g.dice.d2}`; } else delete $('#tray').dataset.sum;
     S.rendered = g;
     renderHUD();
     if (g.card) { await openCard(g, true); renderCard(g); }
@@ -240,7 +243,9 @@ async function transition(prev, g) {
   if (g.dice && (!prev.dice || prev.dice.id !== g.dice.id)) {
     S.rendered = { ...prev, dice: g.dice };
     renderHUD();
+    delete $('#tray').dataset.sum;
     await rollTo(dice, g.dice.d1, g.dice.d2);
+    $('#tray').dataset.sum = `= ${g.dice.d1 + g.dice.d2}`;
     toast(`${g.dice.by === S.me ? 'Sacaste' : `${NAME(g.dice.by)} sacó`} ${g.dice.d1} + ${g.dice.d2} = ${g.dice.d1 + g.dice.d2}`, 1600);
     await sleep(250);
   }
@@ -273,6 +278,7 @@ async function transition(prev, g) {
 }
 
 function afterState(prev, g) {
+  autoSave(prev, g);
   // c'est mon tour
   if (g.status === 'playing' && !g.card && g.turn === S.me && (!prev || prev.turn !== S.me || prev.card)) {
     sfx.play('notify');
@@ -337,6 +343,8 @@ async function openCard(g, instant) {
   Object.assign(flyer.style, { left: z.x + 'px', top: z.y + 'px', width: z.w + 'px', height: z.h + 'px' });
   $('#cardLayer').append(flyer);
   S.card = { id: c.id, n: c.n, flyer, flip, body: back.firstChild, sig: '', phase: '' };
+  S.peek = false;
+  $('#cardLayer').classList.remove('peek');
   showHole(c.n, true);
   if (isMeta) $('.stk-heart').classList.add('lifted-away');
   $('#backdrop').classList.add('on');
@@ -360,6 +368,9 @@ async function closeCard(instant) {
   const c = S.card;
   if (!c) return;
   S.card = null;
+  S.peek = false;
+  $('#cardLayer').classList.remove('peek');
+  hide('menu');
   document.activeElement && document.activeElement.blur && document.activeElement.blur();
   $('#backdrop').classList.remove('on');
   document.body.classList.remove('card-open');
@@ -851,7 +862,7 @@ function showHistory() {
       h('div', { class: 'hist-top' }, h('span', { class: `tok tok-${l.by}`, text: l.by }), h('b', { text: t.label }), h('span', { class: 'pts', text: pts || '—' })),
       l.q && l.q !== t.label ? h('div', { class: 'hist-q', text: l.q }) : null,
       l.a ? h('div', { class: 'hist-a', text: `«${l.a}»` }) : null,
-      h('small', { class: l.ok ? 'ok' : 'ko', text: l.ok ? '✓ vale' : l.mg ? mgLine(l) : '✗ no vale' }));
+      h('small', { class: l.ok ? 'ok' : 'ko', text: l.ok ? '✓ vale' : l.skip ? '⏭️ carta cerrada' : l.mg ? mgLine(l) : '✗ no vale' }));
     if (l.photo) {
       const img = h('img', { class: 'photo small', alt: 'foto' });
       net.loadPhoto(l.photo).then((u) => { if (u) img.src = u; });
@@ -867,7 +878,34 @@ function showRules() {
     h('div', { class: 'rules' }, ...RULES.map(([i, t]) => h('div', { class: 'rule' }, h('span', { text: i }), h('p', { text: t })))));
 }
 
+// ------------------------------------------------------------------ menu d'options
+function setPeek(on) {
+  S.peek = !!on && !!S.card;
+  $('#cardLayer').classList.toggle('peek', S.peek);
+  document.body.classList.toggle('card-open', !!S.card && !S.peek);
+}
+
+const opt = (icon, label, sub, fn, cls = '') => h('button', { class: `opt ${cls}`, onclick: fn },
+  h('span', { class: 'i', text: icon }), h('span', { class: 'opt-t' }, h('b', { text: label }), sub ? h('small', { text: sub }) : null));
+
+function confirmBox(title, text, okLabel, fn, danger = false) {
+  screen('confirm',
+    h('div', { class: 'logo', text: danger ? '⚠️' : '💭' }),
+    h('h1', { text: title }),
+    text ? h('p', { class: 'note', text }) : null,
+    h('div', { class: 'row' },
+      h('button', { class: 'btn ghost', text: 'Cancelar', onclick: () => hide('confirm') }),
+      h('button', {
+        class: `btn ${danger ? 'no' : ''}`, text: okLabel, onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try { await fn(); } finally { hide('confirm'); }
+        },
+      })));
+}
+
 function showMenu() {
+  sfx.unlock();
+  const g = S.game;
   const o = S.me ? other(S.me) : 'A';
   const copy = async () => {
     const url = shareLink(o);
@@ -876,13 +914,111 @@ function showMenu() {
       else { await navigator.clipboard.writeText(url); toast('Enlace copiado ✓'); }
     } catch (e) { /* annule */ }
   };
-  screen('menu', closeBtn('menu'), h('h1', { text: 'Menú' }),
-    h('button', { class: 'btn ghost', text: `🔗 Enviar su enlace a ${NAME(o)}`, onclick: copy }),
-    h('button', { class: 'btn ghost', text: '📜 Nuestras respuestas', onclick: () => { hide('menu'); showHistory(); } }),
-    h('button', { class: 'btn ghost', text: '📖 Reglas', onclick: () => { hide('menu'); showRules(); } }),
-    h('button', { class: 'btn ghost', text: sfx.isMuted() ? '🔊 Activar el sonido' : '🔇 Silenciar', onclick: () => { toggleSound(); hide('menu'); } }),
-    h('button', { class: 'btn ghost', text: '🎲 Nueva partida', onclick: () => { hide('menu'); openLobby(); } }),
-    h('button', { class: 'btn ghost', text: `👤 Soy ${S.me ? NAME(S.me) : '…'} — cambiar`, onclick: () => { hide('menu'); showWho(); } }));
+  const go = (fn) => () => { hide('menu'); fn(); };
+  const list = h('div', { class: 'opt-list' });
+  if (S.card) {
+    list.append(
+      opt('🃏', 'Volver a la carta', null, go(() => setPeek(false))),
+      opt('👀', 'Ver el tablero', 'La carta te espera: un toque abajo para volver', go(() => setPeek(true))));
+  }
+  list.append(
+    opt('📜', 'Nuestras respuestas', null, go(showHistory)),
+    opt('📖', 'Reglas', null, go(showRules)),
+    opt(sfx.isMuted() ? '🔊' : '🔇', sfx.isMuted() ? 'Activar el sonido' : 'Silenciar', null, go(toggleSound)),
+    opt('🔗', `Enviar su enlace a ${NAME(o)}`, null, copy),
+    opt('👤', `Soy ${S.me ? NAME(S.me) : '…'}`, 'Cambiar de jugador en este aparato', go(showWho)));
+
+  if (S.me === 'J') {
+    list.append(h('div', { class: 'opt-sec' }, h('span', { text: 'Opciones de Jaemeson' })));
+    if (g && g.card) {
+      list.append(opt('⏭️', 'Cerrar esta carta sin puntos', 'Si una carta se quedó trabada', go(() => confirmBox(
+        '¿Cerrar la carta?', 'Nadie gana puntos y pasa el turno.', 'Cerrar la carta', () => net.act((x) => R.skipCard(x))))));
+    }
+    if (g && g.status === 'playing' && !g.card) {
+      const t = other(g.turn);
+      if (!g.done[t]) list.append(opt('🔁', `Dar el turno a ${NAME(t)}`, null, go(() => net.act((x) => R.setTurn(x, t)))));
+    }
+    list.append(
+      opt('↩️', 'Deshacer el último turno', 'Vuelve al turno guardado anterior', go(undoLast)),
+      opt('💾', 'Partidas guardadas', 'Se guarda sola a cada turno', go(showSaves)));
+    if (g) for (const k of ['A', 'J']) list.append(adjustRow(k));
+    list.append(opt('🔄', 'Reiniciar la partida', 'Se guarda antes, se puede recuperar', go(() => confirmBox(
+      '¿Reiniciar la partida?', 'La partida actual queda guardada en «Partidas guardadas».', 'Reiniciar', resetGame, true)), 'danger'));
+  }
+  screen('menu', closeBtn('menu'), h('h1', { text: 'Opciones' }), list);
+}
+
+function adjustRow(k) {
+  const val = h('b', { class: 'adj-v', text: String(S.game ? S.game.score[k] : 0) });
+  const step = (d) => async () => {
+    const ok = await net.act((x) => R.adjustScore(x, k, d));
+    if (ok && S.game) val.textContent = String(S.game.score[k]);
+  };
+  return h('div', { class: 'adjust' },
+    h('span', { class: `tok tok-${k}`, text: k }), h('span', { class: 'adj-n', text: `Puntos de ${NAME(k)}` }),
+    h('button', { 'aria-label': 'menos', text: '−', onclick: step(-1) }), val,
+    h('button', { 'aria-label': 'más', text: '+', onclick: step(1) }));
+}
+
+// ------------------------------------------------------------------ sauvegardes
+function autoSave(prev, g) {
+  try {
+    if (!prev || prev.id !== g.id || (prev.rk || '') !== (g.rk || '')) {
+      if ((g.n || 0) === 0) net.saveSnapshot(g, 'Inicio de la partida');
+      return;
+    }
+    if (g.status === 'ended' && prev.status !== 'ended') { net.saveSnapshot(g, 'Fin de la partida'); return; }
+    if (prev.card && !g.card && g.log.length) {
+      const l = g.log[g.log.length - 1];
+      net.saveSnapshot(g, `Turno ${g.log.length} · ${NAME(l.by)} en «${BOARD.tiles[l.n].label}»`);
+    }
+  } catch (e) { console.warn('sauvegarde', e); }
+}
+
+const fmtDate = (t) => new Date(t).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+async function restoreSave(s) {
+  if (S.game) await net.saveSnapshot(S.game, 'Antes de restaurar', 'pre');
+  await net.writeGame(R.restored(s.game));
+  hide('saves');
+  toast('Partida restaurada ✓');
+}
+
+async function undoLast() {
+  const g = S.game;
+  if (!g) return;
+  const saves = (await net.listSaves(20)).filter((s) => s.gid === g.id && !/_(pre|reset)$/.test(s.key) && s.n < (g.n || 0));
+  const target = saves[0];
+  if (!target) { toast('No hay un turno anterior guardado'); return; }
+  confirmBox('¿Deshacer?', `Volver a: ${target.label || 'copia guardada'} (${fmtDate(target.at)}). Marcador ${PLAYERS.A.short} ${target.score.A || 0} – ${target.score.J || 0} ${PLAYERS.J.short}.`, 'Deshacer', () => restoreSave(target));
+}
+
+async function showSaves() {
+  const list = h('div', { class: 'saves' }, h('p', { class: 'note', text: 'Cargando…' }));
+  screen('saves', closeBtn('saves'), h('h1', { text: 'Partidas guardadas' }),
+    h('p', { class: 'note', text: 'Una copia por turno, la más reciente arriba. Restaurar no borra nada: el estado actual también se guarda.' }), list);
+  const saves = await net.listSaves(30);
+  clear(list);
+  if (!saves.length) list.append(h('p', { class: 'note', text: 'Todavía no hay copias guardadas.' }));
+  for (const s of saves) {
+    const cur = S.game && s.gid === S.game.id && s.n === S.game.n;
+    list.append(h('div', { class: 'save-item' + (cur ? ' cur' : '') },
+      h('div', { class: 'save-t' },
+        h('b', { text: s.label || 'Copia guardada' }),
+        h('small', { text: `${fmtDate(s.at)} · ${PLAYERS.A.short} ${s.score.A || 0} – ${s.score.J || 0} ${PLAYERS.J.short} · casillas ${s.pos.A || 0} / ${s.pos.J || 0}${s.status === 'ended' ? ' · terminada' : ''}` })),
+      cur ? h('span', { class: 'save-cur', text: 'actual' }) : h('button', {
+        class: 'btn ghost small', text: 'Restaurar',
+        onclick: () => confirmBox('¿Restaurar?', `${s.label || ''} — ${fmtDate(s.at)}`, 'Restaurar', () => restoreSave(s)),
+      })));
+  }
+}
+
+async function resetGame() {
+  if (S.game) {
+    await net.saveSnapshot(S.game, 'Antes de reiniciar', 'reset');
+    if (S.game.log.length) await net.archive(S.game);
+  }
+  openLobby();
 }
 
 // outils de test, seulement en local
