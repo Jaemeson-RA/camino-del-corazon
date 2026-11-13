@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <title>Camino del Corazón</title>
+  <meta name="description" content="Nuestro juego de mesa: avanza hasta el corazón respondiendo con sinceridad.">
+  <meta name="theme-color" content="#ffe3dd">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Corazón">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="preload" href="assets/board-sm.webp" as="image">
+  <link rel="preload" href="fonts/quicksand-v37-latin_latin-ext-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/app.css?v=202611122220">
+</head>
+<body>
+  <div id="app" class="layout"></div>
+  <div class="splash" id="splash">
+    <div class="splash-heart">♥</div>
+    <div class="splash-title">Camino del Corazón</div>
+  </div>
+  <noscript>Este juego necesita JavaScript.</noscript>
+  <script type="module" src="js/app.js?v=202611122220"></script>
+  <script>
+    // retire l'ecran de chargement une fois le plateau affiche
+    window.addEventListener('load', function () {
+      setTimeout(function () { var s = document.getElementById('splash'); if (s) s.classList.add('off'); }, 350);
+    });
+  </script>
+</body>
+</html>
